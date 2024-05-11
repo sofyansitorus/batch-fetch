@@ -90,6 +90,16 @@ const registerRequest = (
     return batchId;
 }
 
+/**
+ * Makes a batched fetch request to the specified URL with the given options.
+ *
+ * @since 1.0.0
+ *
+ * @param {string} url - The URL to fetch.
+ * @param {RequestInit} options - The options for the fetch request.
+ *
+ * @returns {Promise<Response>} A Promise that resolves to the response of the fetch request.
+ */
 const batchFetch = (
     url: string,
     options: RequestInit
