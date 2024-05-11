@@ -1,6 +1,6 @@
 {
   "name": "@sofyansitorus/batch-fetch",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Custom implementation of a fetch API that supports batch requests.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,13 +10,21 @@
     "build": "tsc"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Sofyan Sitorus (https://sofyansitorus.com)",
+  "license": "MIT",
   "devDependencies": {
     "@types/object-hash": "^3.0.6",
     "typescript": "^5.4.5"
   },
   "dependencies": {
     "object-hash": "^3.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sofyansitorus/batch-fetch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sofyansitorus/batch-fetch/issues"
+  },
+  "homepage": "https://github.com/sofyansitorus/batch-fetch#readme"
 }
