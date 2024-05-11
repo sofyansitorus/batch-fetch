@@ -157,7 +157,7 @@ const batchFetch = (
                 window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
 
                 // Increment the `aborted` counter.
-                (requestCounter[batchId] as RequestCounter).aborted = 1;
+                (requestCounter[batchId] as RequestCounter).aborted += 1;
 
                 // If all registered requests are aborted, abort the signal and clear the debounce timeout,
                 // then unregister the request.
