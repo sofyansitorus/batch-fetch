@@ -2,7 +2,7 @@ import hash from 'object-hash';
 
 declare global {
     interface WindowEventMap {
-        'batchFetchThen': CustomEvent;
+        'batchFetchThen': CustomEvent<Record<string, Response>>;
         'batchFetchCatch': CustomEvent<Record<string, Error>>;
     }
 }
