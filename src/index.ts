@@ -23,54 +23,63 @@ const requestCounter: Record<string, RequestCounter> = {};
 const requestDebounce: Record<string, ReturnType<typeof setTimeout>> = {};
 const requestSignals: Record<string, AbortController> = {};
 
-const unegisterRequest = (batchId: string) => {
+const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter):void => {
+    (requestCounter[batchId] as RequestCounter)[itemType] += 1;
+};
+
+const isRequestCounterMax = (batchId: string, itemType: keyof Omit<RequestCounter, 'registered'>):boolean => {
+    const registeredCount = requestCounter?.[batchId]?.registered;
+
+    if (!registeredCount) {
+        return false;
+    }
+
+    return registeredCount === requestCounter?.[batchId]?.[itemType];
+};
+
+const unegisterRequest = (batchId: string):void => {
     delete requestPayload[batchId];
     delete requestCounter[batchId];
     delete requestDebounce[batchId];
     delete requestSignals[batchId];
 }
 
-const dispatchRequest = (batchId: string) => {
+const dispatchRequest = (batchId: string):void => {
     requestSignals[batchId] = new AbortController();
 
     fetch(requestPayload?.[batchId]?.url ?? '', {
         ...requestPayload?.[batchId]?.options,
         signal: requestSignals?.[batchId]?.signal,
-    })
-        .then((response) => {
-            window.dispatchEvent(new CustomEvent('batchFetchThen', {
-                detail: { [`${batchId}`]: response },
+    }).then((response) => {
+        window.dispatchEvent(new CustomEvent('batchFetchThen', {
+            detail: { [`${batchId}`]: response },
+        }));
+    }).catch((error) => {
+        // If the error is not an abort error, dispatch the error event.
+        // The abort error is already handled inside the batchFetch function.
+        if ('AbortError' !== error?.name) {
+            window.dispatchEvent(new CustomEvent('batchFetchCatch', {
+                detail: { [`${batchId}`]: error },
             }));
-        })
-        .catch((error) => {
-            if ('AbortError' !== error?.name) {
-                window.dispatchEvent(new CustomEvent('batchFetchCatch', {
-                    detail: { [`${batchId}`]: error },
-                }));
-            }
-        });
+        }
+    });
 };
 
-const debounceRequest = (batchId: string) => {
+const debounceRequest = (batchId: string):void => {
     if (requestDebounce[batchId]) {
         clearTimeout(requestDebounce[batchId]);
     }
 
     requestDebounce[batchId] = setTimeout(() => {
         dispatchRequest(batchId);
-    }, 1000);
+    }, 500);
 };
 
 const registerRequest = (
+    batchId: string,
     url: string,
     options: RequestInit = {}
-) => {
-    const batchId = hash({ url, options });
-
-    if (requestSignals[batchId]) {
-        throw new Error('Request already dispatched');
-    }
-
+):void => {
     if (!requestPayload[batchId]) {
         requestPayload[batchId] = { url, options };
     }
@@ -83,11 +92,10 @@ const registerRequest = (
         }
     }
 
-    (requestCounter[batchId] as RequestCounter).registered += 1;
+    // Increment the `registered` counter.
+    incrementRequestCounter(batchId, 'registered');
 
     debounceRequest(batchId);
-
-    return batchId;
 }
 
 /**
@@ -103,9 +111,16 @@ const registerRequest = (
 const batchFetch = (
     url: string,
     options: RequestInit
-): Promise<Response> => {
+):Promise<Response> => {
     const { signal, ...otherOptions } = options;
-    const batchId = registerRequest(url, otherOptions);
+    const batchId = hash({ url, otherOptions });
+
+    // If the request is already dispatched, proceed with fetch request normally.
+    if (Object.prototype.hasOwnProperty.call(requestSignals, batchId)) {
+        return fetch(url, options);
+    }
+
+    registerRequest(batchId, url, otherOptions);
 
     return new Promise((resolve, reject) => {
         const onBatchFetchThen = (event: CustomEvent<Record<string, Response>>) => {
@@ -116,10 +131,10 @@ const batchFetch = (
                 window.removeEventListener('batchFetchThen', onBatchFetchThen);
 
                 // Increment the `processed` counter.
-                (requestCounter[batchId] as RequestCounter).processed += 1;
+                incrementRequestCounter(batchId, 'processed');
 
                 // If all registered requests are processed, unregister the request.
-                if (requestCounter?.[batchId]?.processed === requestCounter?.[batchId]?.registered) {
+                if (isRequestCounterMax(batchId, 'processed')) {
                     unegisterRequest(batchId);
                 }
 
@@ -135,10 +150,10 @@ const batchFetch = (
                 window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
 
                 // Increment the `processed` counter.
-                (requestCounter[batchId] as RequestCounter).processed += 1;
+                incrementRequestCounter(batchId, 'processed');
 
                 // If all registered requests are processed, unregister the request.
-                if (requestCounter?.[batchId]?.processed === requestCounter?.[batchId]?.registered) {
+                if (isRequestCounterMax(batchId, 'processed')) {
                     unegisterRequest(batchId);
                 }
 
@@ -157,19 +172,19 @@ const batchFetch = (
                 window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
 
                 // Increment the `aborted` counter.
-                (requestCounter[batchId] as RequestCounter).aborted += 1;
+                incrementRequestCounter(batchId, 'aborted');
 
-                // If all registered requests are aborted, abort the signal and clear the debounce timeout,
-                // then unregister the request.
-                if (requestCounter?.[batchId]?.aborted === requestCounter?.[batchId]?.registered) {
-                    // Abort the signal.
-                    if (requestSignals[batchId]) {
-                        requestSignals?.[batchId]?.abort();
-                    }
-
+                // If all registered requests are aborted, clear the debounce timeout, abort the signal,
+                // and unregister the request.
+                if (isRequestCounterMax(batchId, 'aborted')) {
                     // Clear the debounce timeout.
                     if (requestDebounce[batchId]) {
                         clearTimeout(requestDebounce[batchId]);
+                    }
+
+                    // Abort the signal.
+                    if (requestSignals[batchId]) {
+                        requestSignals?.[batchId]?.abort();
                     }
 
                     // Unregister the request.
