@@ -1,6 +1,6 @@
 {
   "name": "@sofyansitorus/batch-fetch",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Custom implementation of a fetch API that supports batch requests.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
