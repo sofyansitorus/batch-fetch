@@ -62,6 +62,5 @@ This optimization minimizes unnecessary network traffic and server load, improvi
 
 #### Notes
 
-- This utility is compatible only in browser environments.
-
+- This utility is compatible only with browser environments.
 - The response from `batchFetch` is the same instance of response when using the native `fetch` function.
