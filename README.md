@@ -44,7 +44,7 @@ console.log(await c.json());
 
 ## Demo
 
-https://codesandbox.io/p/sandbox/batch-fetch-react-gxyw23
+https://batch-fetch-playground.netlify.app
 
 ## How Batching Works
 
