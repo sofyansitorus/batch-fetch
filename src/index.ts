@@ -5,20 +5,12 @@ import type {
   RequestPayload,
 } from './types';
 
+import { isPlainObject } from './utils';
+
 const requestPayload = new Map<string, RequestPayload>();
 const requestCounter = new Map<string, RequestCounter>();
 const requestDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSignals = new Map<string, AbortController>();
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-
-  const proto = Object.getPrototypeOf(value);
-
-  return proto === Object.prototype || proto === null;
-};
 
 const createBatchId = (url: string, options: RequestInit): string => {
   let nextCircularRefId = 0;
