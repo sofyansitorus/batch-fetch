@@ -5,6 +5,7 @@
     "module": "es2015",
     "declaration": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "noEmit": false,
     "strict": true,
     "noImplicitAny": true,
@@ -21,6 +22,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
