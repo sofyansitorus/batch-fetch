@@ -12,6 +12,14 @@ const requestCounter = new Map<string, RequestCounter>();
 const requestDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 const requestSignals = new Map<string, AbortController>();
 
+/**
+ * Increments a request counter field for the given batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {keyof RequestCounter} itemType - The counter field to increment.
+ *
+ * @returns {void}
+ */
 const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter): void => {
   const counter = requestCounter.get(batchId);
 
@@ -22,6 +30,14 @@ const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter
   counter[itemType] += 1;
 };
 
+/**
+ * Checks whether a specific counter field has reached the registered request count.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {keyof Omit<RequestCounter, 'registered'>} itemType - The counter field to compare.
+ *
+ * @returns {boolean} Returns true when the counter matches the registered count.
+ */
 const isRequestCounterMax = (
   batchId: string,
   itemType: keyof Omit<RequestCounter, 'registered'>,
@@ -36,6 +52,13 @@ const isRequestCounterMax = (
   return registeredCount === counter?.[itemType];
 };
 
+/**
+ * Removes all request-related state for a completed or cancelled batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
 const unegisterRequest = (batchId: string): void => {
   requestPayload.delete(batchId);
   requestCounter.delete(batchId);
@@ -43,6 +66,13 @@ const unegisterRequest = (batchId: string): void => {
   requestSignals.delete(batchId);
 };
 
+/**
+ * Dispatches the underlying fetch request for a registered batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
 const dispatchRequest = (batchId: string): void => {
   const payload = requestPayload.get(batchId);
 
@@ -77,6 +107,13 @@ const dispatchRequest = (batchId: string): void => {
     });
 };
 
+/**
+ * Debounces request dispatch so nearby calls are grouped into one network request.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
 const debounceRequest = (batchId: string): void => {
   const timeoutId = requestDebounce.get(batchId);
 
@@ -92,6 +129,15 @@ const debounceRequest = (batchId: string): void => {
   );
 };
 
+/**
+ * Registers request metadata and schedules the batched request dispatch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {string} url - The target request URL.
+ * @param {RequestInit} options - The request options for the batch payload.
+ *
+ * @returns {void}
+ */
 const registerRequest = (batchId: string, url: string, options: RequestInit = {}): void => {
   if (!requestPayload.has(batchId)) {
     requestPayload.set(batchId, { url, options });
