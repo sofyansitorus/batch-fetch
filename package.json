@@ -1,13 +1,15 @@
 {
   "name": "@sofyansitorus/batch-fetch",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Custom implementation of a fetch API that supports batch requests.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc"
+    "test": "vitest run",
+    "build": "tsc",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [
     "fetch",
@@ -17,11 +19,9 @@
   "author": "Sofyan Sitorus (https://sofyansitorus.com)",
   "license": "MIT",
   "devDependencies": {
-    "@types/object-hash": "^3.0.6",
-    "typescript": "^5.4.5"
-  },
-  "dependencies": {
-    "object-hash": "^3.0.0"
+    "prettier": "^3.8.3",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.6"
   },
   "repository": {
     "type": "git",

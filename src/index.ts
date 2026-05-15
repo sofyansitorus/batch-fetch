@@ -1,102 +1,161 @@
-import hash from 'object-hash';
+import type {
+  BatchFetchThenDetail,
+  BatchFetchCatchDetail,
+  RequestCounter,
+  RequestPayload,
+} from './types';
 
-declare global {
-    interface WindowEventMap {
-        'batchFetchThen': CustomEvent<Record<string, Response>>;
-        'batchFetchCatch': CustomEvent<Record<string, Error>>;
-    }
-}
+import { createBatchId } from './utils';
 
-interface RequestPayload {
-    url: string;
-    options?: Omit<RequestInit, 'signal'>;
-}
+const requestPayload = new Map<string, RequestPayload>();
+const requestCounter = new Map<string, RequestCounter>();
+const requestDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+const requestSignals = new Map<string, AbortController>();
 
-interface RequestCounter {
-    registered: number;
-    aborted: number;
-    processed: number;
-}
+/**
+ * Increments a request counter field for the given batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {keyof RequestCounter} itemType - The counter field to increment.
+ *
+ * @returns {void}
+ */
+const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter): void => {
+  const counter = requestCounter.get(batchId);
 
-const requestPayload: Record<string, RequestPayload> = {};
-const requestCounter: Record<string, RequestCounter> = {};
-const requestDebounce: Record<string, ReturnType<typeof setTimeout>> = {};
-const requestSignals: Record<string, AbortController> = {};
+  if (!counter) {
+    return;
+  }
 
-const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter):void => {
-    (requestCounter[batchId] as RequestCounter)[itemType] += 1;
+  counter[itemType] += 1;
 };
 
-const isRequestCounterMax = (batchId: string, itemType: keyof Omit<RequestCounter, 'registered'>):boolean => {
-    const registeredCount = requestCounter?.[batchId]?.registered;
+/**
+ * Checks whether a specific counter field has reached the registered request count.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {keyof Omit<RequestCounter, 'registered'>} itemType - The counter field to compare.
+ *
+ * @returns {boolean} Returns true when the counter matches the registered count.
+ */
+const isRequestCounterMax = (
+  batchId: string,
+  itemType: keyof Omit<RequestCounter, 'registered'>,
+): boolean => {
+  const counter = requestCounter.get(batchId);
+  const registeredCount = counter?.registered;
 
-    if (!registeredCount) {
-        return false;
-    }
+  if (!registeredCount) {
+    return false;
+  }
 
-    return registeredCount === requestCounter?.[batchId]?.[itemType];
+  return registeredCount === counter?.[itemType];
 };
 
-const unegisterRequest = (batchId: string):void => {
-    delete requestPayload[batchId];
-    delete requestCounter[batchId];
-    delete requestDebounce[batchId];
-    delete requestSignals[batchId];
-}
+/**
+ * Removes all request-related state for a completed or cancelled batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
+const unegisterRequest = (batchId: string): void => {
+  requestPayload.delete(batchId);
+  requestCounter.delete(batchId);
+  requestDebounce.delete(batchId);
+  requestSignals.delete(batchId);
+};
 
-const dispatchRequest = (batchId: string):void => {
-    requestSignals[batchId] = new AbortController();
+/**
+ * Dispatches the underlying fetch request for a registered batch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
+const dispatchRequest = (batchId: string): void => {
+  const payload = requestPayload.get(batchId);
 
-    fetch(requestPayload?.[batchId]?.url ?? '', {
-        ...requestPayload?.[batchId]?.options,
-        signal: requestSignals?.[batchId]?.signal,
-    }).then((response) => {
-        window.dispatchEvent(new CustomEvent('batchFetchThen', {
-            detail: { [`${batchId}`]: response },
-        }));
-    }).catch((error) => {
-        // If the error is not an abort error, dispatch the error event.
-        // The abort error is already handled inside the batchFetch function.
-        if ('AbortError' !== error?.name) {
-            window.dispatchEvent(new CustomEvent('batchFetchCatch', {
-                detail: { [`${batchId}`]: error },
-            }));
-        }
+  if (!payload) {
+    return;
+  }
+
+  const controller = new AbortController();
+  requestSignals.set(batchId, controller);
+
+  fetch(payload.url, {
+    ...payload.options,
+    signal: controller.signal,
+  })
+    .then((response) => {
+      window.dispatchEvent(
+        new CustomEvent<BatchFetchThenDetail>('batchFetchThen', {
+          detail: { batchId, response },
+        }),
+      );
+    })
+    .catch((error) => {
+      // If the error is not an abort error, dispatch the error event.
+      // The abort error is already handled inside the batchFetch function.
+      if ('AbortError' !== error?.name) {
+        window.dispatchEvent(
+          new CustomEvent<BatchFetchCatchDetail>('batchFetchCatch', {
+            detail: { batchId, error },
+          }),
+        );
+      }
     });
 };
 
-const debounceRequest = (batchId: string):void => {
-    if (requestDebounce[batchId]) {
-        clearTimeout(requestDebounce[batchId]);
-    }
+/**
+ * Debounces request dispatch so nearby calls are grouped into one network request.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ *
+ * @returns {void}
+ */
+const debounceRequest = (batchId: string): void => {
+  const timeoutId = requestDebounce.get(batchId);
 
-    requestDebounce[batchId] = setTimeout(() => {
-        dispatchRequest(batchId);
-    }, 500);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  requestDebounce.set(
+    batchId,
+    setTimeout(() => {
+      dispatchRequest(batchId);
+    }, 500),
+  );
 };
 
-const registerRequest = (
-    batchId: string,
-    url: string,
-    options: RequestInit = {}
-):void => {
-    if (!requestPayload[batchId]) {
-        requestPayload[batchId] = { url, options };
-    }
+/**
+ * Registers request metadata and schedules the batched request dispatch.
+ *
+ * @param {string} batchId - The unique batch identifier.
+ * @param {string} url - The target request URL.
+ * @param {RequestInit} options - The request options for the batch payload.
+ *
+ * @returns {void}
+ */
+const registerRequest = (batchId: string, url: string, options: RequestInit = {}): void => {
+  if (!requestPayload.has(batchId)) {
+    requestPayload.set(batchId, { url, options });
+  }
 
-    if (!requestCounter[batchId]) {
-        requestCounter[batchId] = {
-            registered: 0,
-            aborted: 0,
-            processed: 0,
-        }
-    }
+  if (!requestCounter.has(batchId)) {
+    requestCounter.set(batchId, {
+      registered: 0,
+      aborted: 0,
+      processed: 0,
+    });
+  }
 
-    // Increment the `registered` counter.
-    incrementRequestCounter(batchId, 'registered');
+  // Increment the `registered` counter.
+  incrementRequestCounter(batchId, 'registered');
 
-    debounceRequest(batchId);
-}
+  debounceRequest(batchId);
+};
 
 /**
  * Makes a batched fetch request to the specified URL with the given options.
@@ -108,98 +167,111 @@ const registerRequest = (
  *
  * @returns {Promise<Response>} A Promise that resolves to the response of the fetch request.
  */
-const batchFetch = (
-    url: string,
-    options: RequestInit
-):Promise<Response> => {
-    const { signal, ...otherOptions } = options;
-    const batchId = hash({ url, otherOptions });
+const batchFetch = (url: string, options: RequestInit): Promise<Response> => {
+  const { signal, ...otherOptions } = options;
+  const batchId = createBatchId(url, otherOptions);
 
-    // If the request is already dispatched, proceed with fetch request normally.
-    if (Object.prototype.hasOwnProperty.call(requestSignals, batchId)) {
-        return fetch(url, options);
-    }
+  // If the request is already dispatched, proceed with fetch request normally.
+  if (requestSignals.has(batchId)) {
+    return fetch(url, options);
+  }
 
-    registerRequest(batchId, url, otherOptions);
+  registerRequest(batchId, url, otherOptions);
 
-    return new Promise((resolve, reject) => {
-        const onBatchFetchThen = (event: CustomEvent<Record<string, Response>>) => {
-            const response = event.detail?.[batchId];
+  return new Promise((resolve, reject) => {
+    const onBatchFetchThen = (event: CustomEvent<BatchFetchThenDetail>) => {
+      if (event.detail.batchId !== batchId) {
+        return;
+      }
 
-            if (response) {
-                // Remove the event listeners.
-                window.removeEventListener('batchFetchThen', onBatchFetchThen);
+      const { response } = event.detail;
 
-                // Increment the `processed` counter.
-                incrementRequestCounter(batchId, 'processed');
+      if (response) {
+        // Remove the event listeners.
+        window.removeEventListener('batchFetchThen', onBatchFetchThen);
 
-                // If all registered requests are processed, unregister the request.
-                if (isRequestCounterMax(batchId, 'processed')) {
-                    unegisterRequest(batchId);
-                }
+        // Increment the `processed` counter.
+        incrementRequestCounter(batchId, 'processed');
 
-                resolve(response.clone());
-            }
-        };
-
-        const onBatchFetchCatch = (event: CustomEvent<Record<string, Error>>) => {
-            const error = event.detail?.[batchId];
-
-            if (error) {
-                // Remove the event listeners.
-                window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
-
-                // Increment the `processed` counter.
-                incrementRequestCounter(batchId, 'processed');
-
-                // If all registered requests are processed, unregister the request.
-                if (isRequestCounterMax(batchId, 'processed')) {
-                    unegisterRequest(batchId);
-                }
-
-                reject(error);
-            }
-        };
-
-        // Register event listeners.
-        window.addEventListener('batchFetchThen', onBatchFetchThen);
-        window.addEventListener('batchFetchCatch', onBatchFetchCatch);
-
-        if (signal) {
-            signal.addEventListener('abort', () => {
-                // Remove the event listeners.
-                window.removeEventListener('batchFetchThen', onBatchFetchThen);
-                window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
-
-                // Increment the `aborted` counter.
-                incrementRequestCounter(batchId, 'aborted');
-
-                // If all registered requests are aborted, clear the debounce timeout, abort the signal,
-                // and unregister the request.
-                if (isRequestCounterMax(batchId, 'aborted')) {
-                    // Clear the debounce timeout.
-                    if (requestDebounce[batchId]) {
-                        clearTimeout(requestDebounce[batchId]);
-                    }
-
-                    // Abort the signal.
-                    if (requestSignals[batchId]) {
-                        requestSignals?.[batchId]?.abort();
-                    }
-
-                    // Unregister the request.
-                    unegisterRequest(batchId);
-                }
-
-                // Throw the abort error then catch the `error` object to be passed to the `reject` function.
-                try {
-                    signal.throwIfAborted();
-                } catch (error) {
-                    reject(error);
-                }
-            }, { once: true });
+        // If all registered requests are processed, unregister the request.
+        if (isRequestCounterMax(batchId, 'processed')) {
+          unegisterRequest(batchId);
         }
-    });
-}
+
+        resolve(response.clone());
+      }
+    };
+
+    const onBatchFetchCatch = (event: CustomEvent<BatchFetchCatchDetail>) => {
+      if (event.detail.batchId !== batchId) {
+        return;
+      }
+
+      const { error } = event.detail;
+
+      if (error) {
+        // Remove the event listeners.
+        window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
+
+        // Increment the `processed` counter.
+        incrementRequestCounter(batchId, 'processed');
+
+        // If all registered requests are processed, unregister the request.
+        if (isRequestCounterMax(batchId, 'processed')) {
+          unegisterRequest(batchId);
+        }
+
+        reject(error);
+      }
+    };
+
+    // Register event listeners.
+    window.addEventListener('batchFetchThen', onBatchFetchThen);
+    window.addEventListener('batchFetchCatch', onBatchFetchCatch);
+
+    if (signal) {
+      signal.addEventListener(
+        'abort',
+        () => {
+          // Remove the event listeners.
+          window.removeEventListener('batchFetchThen', onBatchFetchThen);
+          window.removeEventListener('batchFetchCatch', onBatchFetchCatch);
+
+          // Increment the `aborted` counter.
+          incrementRequestCounter(batchId, 'aborted');
+
+          // If all registered requests are aborted, clear the debounce timeout, abort the signal,
+          // and unregister the request.
+          if (isRequestCounterMax(batchId, 'aborted')) {
+            // Clear the debounce timeout.
+            const timeoutId = requestDebounce.get(batchId);
+
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+
+            // Abort the signal.
+            const requestSignal = requestSignals.get(batchId);
+
+            if (requestSignal) {
+              requestSignal.abort();
+            }
+
+            // Unregister the request.
+            unegisterRequest(batchId);
+          }
+
+          // Throw the abort error then catch the `error` object to be passed to the `reject` function.
+          try {
+            signal.throwIfAborted();
+          } catch (error) {
+            reject(error);
+          }
+        },
+        { once: true },
+      );
+    }
+  });
+};
 
 export default batchFetch;
