@@ -1,76 +1,74 @@
-#### batchFetch
+# @sofyansitorus/batch-fetch
 
-The `batchFetch` function is a utility designed to batch multiple fetch requests together and handle them collectively. It allows you to send identical requests in bulk, minimizing network traffic and server load by sending only one unique request for each set of duplicated requests. This function is particularly useful when dealing with scenarios where multiple identical requests need to be made and their responses handled together.
+`batch-fetch` deduplicates identical `fetch` calls made in a short time window, so only one network request is sent for equivalent calls.
 
-#### Installation
+It is useful when the same URL and options may be requested many times concurrently (for example, repeated UI interactions or duplicated data loads).
 
-You can install `batchFetch` via npm:
+## Installation
 
 ```bash
 npm install @sofyansitorus/batch-fetch
 ```
 
-#### Development
+## API
+
+```ts
+batchFetch(url: string, options: RequestInit): Promise<Response>
+```
+
+- `url`: request URL.
+- `options`: standard `fetch` options. A new object can be passed each time.
+
+## Example
+
+```ts
+import batchFetch from '@sofyansitorus/batch-fetch';
+
+const url = 'https://api.example.com/data';
+const options: RequestInit = {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ key: 'value' }),
+};
+
+const [a, b, c] = await Promise.all([
+  batchFetch(url, options),
+  batchFetch(url, options),
+  batchFetch(url, options),
+]);
+
+console.log(await a.json());
+console.log(await b.json());
+console.log(await c.json());
+```
+
+## How Batching Works
+
+- Calls are grouped by a deterministic batch key created from `url` and `options` (excluding `options.signal`).
+- Plain-object key order is normalized, so semantically identical objects still match.
+- Requests are debounced for `500ms`; matching calls in that window share one underlying network request.
+- Each caller receives a cloned `Response` instance (`response.clone()`), not the same object reference.
+
+## Abort Behavior
+
+- Aborting one caller only rejects that caller.
+- If all callers in a pending (not yet dispatched) batch are aborted, the network request is not sent.
+- If a batch has already been dispatched, later identical calls do not join that in-flight batch and use native `fetch` directly.
+
+## Environment Notes
+
+- Browser-oriented implementation (uses `window` events internally).
+
+## Development
 
 ```bash
+npm run test
+npm run build
 npm run format
 npm run format:check
 ```
 
-- `npm run format`: formats all files in the project.
-- `npm run format:check`: checks whether files are already formatted.
-
-#### Usage
-
-```javascript
-import batchFetch from '@sofyansitorus/batch-fetch';
-
-batchFetch(url: string, options: RequestInit): Promise<Response>
-```
-
-- `url`: The URL to fetch.
-- `options`: An object containing any custom settings that you want to apply to the request.
-
-#### Example
-
-```javascript
-import batchFetch from '@sofyansitorus/batch-fetch';
-
-const url = 'https://api.example.com/data';
-const options = {
-  method: 'POST', // Using POST method for demonstration
-  body: JSON.stringify({ key: 'value' }), // Sample request data
-  headers: {
-    'Content-Type': 'application/json',
-  },
-};
-
-const requests = Array(5).fill({ url, options });
-
-requests.forEach((request) => {
-  // Sending the same request data multiple times
-  batchFetch(request.url, request.options)
-    .then((response) => response.json()) // Parse the response body as JSON
-    .then((response) => {
-      // Handle response
-      console.log(response);
-    })
-    .catch((error) => {
-      // Handle error
-      console.error(error);
-    });
-});
-```
-
-In this example, we're demonstrating sending the same request data to the server multiple times. The `batchFetch` utility ensures that only one unique request is sent to the server.
-
-This optimization minimizes unnecessary network traffic and server load, improving efficiency when dealing with multiple identical requests. The responses for each batched request can then be handled as needed.
-
-#### How it Works
-
-`batchFetch` works by internally tracking identical requests and batching them together. When you pass the same request data to `batchFetch` multiple times, it registers these requests internally and identifies them as duplicates. Instead of sending each duplicated request separately, `batchFetch` groups identical requests together and sends only one unique request for each set of duplicates.
-
-#### Notes
-
-- This utility is compatible only with browser environments.
-- The response from `batchFetch` is the same instance of response when using the native `fetch` function.
+- `npm run test`: runs unit tests with Vitest.
+- `npm run build`: compiles TypeScript.
+- `npm run format`: formats files with Prettier.
+- `npm run format:check`: verifies formatting.
