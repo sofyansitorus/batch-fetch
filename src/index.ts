@@ -1,30 +1,9 @@
-declare global {
-  interface WindowEventMap {
-    batchFetchThen: CustomEvent<BatchFetchThenDetail>;
-    batchFetchCatch: CustomEvent<BatchFetchCatchDetail>;
-  }
-}
-
-interface RequestPayload {
-  url: string;
-  options?: Omit<RequestInit, 'signal'>;
-}
-
-interface RequestCounter {
-  registered: number;
-  aborted: number;
-  processed: number;
-}
-
-interface BatchFetchThenDetail {
-  batchId: string;
-  response: Response;
-}
-
-interface BatchFetchCatchDetail {
-  batchId: string;
-  error: Error;
-}
+import type {
+  BatchFetchThenDetail,
+  BatchFetchCatchDetail,
+  RequestCounter,
+  RequestPayload,
+} from './types';
 
 const requestPayload = new Map<string, RequestPayload>();
 const requestCounter = new Map<string, RequestCounter>();
