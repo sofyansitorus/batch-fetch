@@ -1,9 +1,7 @@
-import hash from 'object-hash';
-
 declare global {
     interface WindowEventMap {
-        'batchFetchThen': CustomEvent<Record<string, Response>>;
-        'batchFetchCatch': CustomEvent<Record<string, Error>>;
+        'batchFetchThen': CustomEvent<BatchFetchThenDetail>;
+        'batchFetchCatch': CustomEvent<BatchFetchCatchDetail>;
     }
 }
 
@@ -18,61 +16,184 @@ interface RequestCounter {
     processed: number;
 }
 
-const requestPayload: Record<string, RequestPayload> = {};
-const requestCounter: Record<string, RequestCounter> = {};
-const requestDebounce: Record<string, ReturnType<typeof setTimeout>> = {};
-const requestSignals: Record<string, AbortController> = {};
+interface BatchFetchThenDetail {
+    batchId: string;
+    response: Response;
+}
+
+interface BatchFetchCatchDetail {
+    batchId: string;
+    error: Error;
+}
+
+const requestPayload = new Map<string, RequestPayload>();
+const requestCounter = new Map<string, RequestCounter>();
+const requestDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+const requestSignals = new Map<string, AbortController>();
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+    if (value === null || typeof value !== 'object') {
+        return false;
+    }
+
+    const proto = Object.getPrototypeOf(value);
+
+    return proto === Object.prototype || proto === null;
+};
+
+const createBatchId = (url: string, options: RequestInit): string => {
+    let nextCircularRefId = 0;
+    const circularRefs = new WeakMap<object, number>();
+
+    const serialize = (value: unknown): string => {
+        if (value === null) {
+            return 'null';
+        }
+
+        if (value === undefined) {
+            return 'undefined';
+        }
+
+        if (typeof value === 'string') {
+            return `string:${JSON.stringify(value)}`;
+        }
+
+        if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+            return `${typeof value}:${String(value)}`;
+        }
+
+        if (typeof value === 'symbol') {
+            return `symbol:${String(value)}`;
+        }
+
+        if (typeof value === 'function') {
+            return 'function';
+        }
+
+        if (Array.isArray(value)) {
+            return `[${value.map((item) => serialize(item)).join(',')}]`;
+        }
+
+        if (value instanceof Date) {
+            return `date:${value.toISOString()}`;
+        }
+
+        if (value instanceof URLSearchParams) {
+            return `urlSearchParams:${JSON.stringify(Array.from(value.entries()).sort(([a], [b]) => a.localeCompare(b)))}`;
+        }
+
+        if (value instanceof Headers) {
+            return `headers:${JSON.stringify(Array.from(value.entries()).sort(([a], [b]) => a.localeCompare(b)))}`;
+        }
+
+        if (typeof Blob !== 'undefined' && value instanceof Blob) {
+            return `blob:${value.type}:${value.size}`;
+        }
+
+        if (typeof FormData !== 'undefined' && value instanceof FormData) {
+            const formDataEntries = Array.from(value.entries()).map(([key, formDataValue]) => {
+                if (typeof File !== 'undefined' && formDataValue instanceof File) {
+                    return [key, `file:${formDataValue.name}:${formDataValue.type}:${formDataValue.size}`] as const;
+                }
+
+                return [key, formDataValue] as const;
+            });
+
+            formDataEntries.sort(([a], [b]) => a.localeCompare(b));
+
+            return `formData:${JSON.stringify(formDataEntries)}`;
+        }
+
+        if (typeof value === 'object') {
+            if (circularRefs.has(value)) {
+                return `circularRef:${circularRefs.get(value)}`;
+            }
+
+            circularRefs.set(value, nextCircularRefId);
+            nextCircularRefId += 1;
+
+            if (!isPlainObject(value)) {
+                return `object:${value.constructor?.name ?? 'Object'}`;
+            }
+
+            const keys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+            const serializedEntries = keys.map((key) => `${JSON.stringify(key)}:${serialize(value[key])}`);
+
+            return `{${serializedEntries.join(',')}}`;
+        }
+
+        return String(value);
+    };
+
+    return `${url}::${serialize(options)}`;
+};
 
 const incrementRequestCounter = (batchId: string, itemType: keyof RequestCounter):void => {
-    (requestCounter[batchId] as RequestCounter)[itemType] += 1;
+    const counter = requestCounter.get(batchId);
+
+    if (!counter) {
+        return;
+    }
+
+    counter[itemType] += 1;
 };
 
 const isRequestCounterMax = (batchId: string, itemType: keyof Omit<RequestCounter, 'registered'>):boolean => {
-    const registeredCount = requestCounter?.[batchId]?.registered;
+    const counter = requestCounter.get(batchId);
+    const registeredCount = counter?.registered;
 
     if (!registeredCount) {
         return false;
     }
 
-    return registeredCount === requestCounter?.[batchId]?.[itemType];
+    return registeredCount === counter?.[itemType];
 };
 
 const unegisterRequest = (batchId: string):void => {
-    delete requestPayload[batchId];
-    delete requestCounter[batchId];
-    delete requestDebounce[batchId];
-    delete requestSignals[batchId];
+    requestPayload.delete(batchId);
+    requestCounter.delete(batchId);
+    requestDebounce.delete(batchId);
+    requestSignals.delete(batchId);
 }
 
 const dispatchRequest = (batchId: string):void => {
-    requestSignals[batchId] = new AbortController();
+    const payload = requestPayload.get(batchId);
 
-    fetch(requestPayload?.[batchId]?.url ?? '', {
-        ...requestPayload?.[batchId]?.options,
-        signal: requestSignals?.[batchId]?.signal,
+    if (!payload) {
+        return;
+    }
+
+    const controller = new AbortController();
+    requestSignals.set(batchId, controller);
+
+    fetch(payload.url, {
+        ...payload.options,
+        signal: controller.signal,
     }).then((response) => {
-        window.dispatchEvent(new CustomEvent('batchFetchThen', {
-            detail: { [`${batchId}`]: response },
+        window.dispatchEvent(new CustomEvent<BatchFetchThenDetail>('batchFetchThen', {
+            detail: { batchId, response },
         }));
     }).catch((error) => {
         // If the error is not an abort error, dispatch the error event.
         // The abort error is already handled inside the batchFetch function.
         if ('AbortError' !== error?.name) {
-            window.dispatchEvent(new CustomEvent('batchFetchCatch', {
-                detail: { [`${batchId}`]: error },
+            window.dispatchEvent(new CustomEvent<BatchFetchCatchDetail>('batchFetchCatch', {
+                detail: { batchId, error },
             }));
         }
     });
 };
 
 const debounceRequest = (batchId: string):void => {
-    if (requestDebounce[batchId]) {
-        clearTimeout(requestDebounce[batchId]);
+    const timeoutId = requestDebounce.get(batchId);
+
+    if (timeoutId) {
+        clearTimeout(timeoutId);
     }
 
-    requestDebounce[batchId] = setTimeout(() => {
+    requestDebounce.set(batchId, setTimeout(() => {
         dispatchRequest(batchId);
-    }, 500);
+    }, 500));
 };
 
 const registerRequest = (
@@ -80,16 +201,16 @@ const registerRequest = (
     url: string,
     options: RequestInit = {}
 ):void => {
-    if (!requestPayload[batchId]) {
-        requestPayload[batchId] = { url, options };
+    if (!requestPayload.has(batchId)) {
+        requestPayload.set(batchId, { url, options });
     }
 
-    if (!requestCounter[batchId]) {
-        requestCounter[batchId] = {
+    if (!requestCounter.has(batchId)) {
+        requestCounter.set(batchId, {
             registered: 0,
             aborted: 0,
             processed: 0,
-        }
+        });
     }
 
     // Increment the `registered` counter.
@@ -113,18 +234,22 @@ const batchFetch = (
     options: RequestInit
 ):Promise<Response> => {
     const { signal, ...otherOptions } = options;
-    const batchId = hash({ url, otherOptions });
+    const batchId = createBatchId(url, otherOptions);
 
     // If the request is already dispatched, proceed with fetch request normally.
-    if (Object.prototype.hasOwnProperty.call(requestSignals, batchId)) {
+    if (requestSignals.has(batchId)) {
         return fetch(url, options);
     }
 
     registerRequest(batchId, url, otherOptions);
 
     return new Promise((resolve, reject) => {
-        const onBatchFetchThen = (event: CustomEvent<Record<string, Response>>) => {
-            const response = event.detail?.[batchId];
+        const onBatchFetchThen = (event: CustomEvent<BatchFetchThenDetail>) => {
+            if (event.detail.batchId !== batchId) {
+                return;
+            }
+
+            const { response } = event.detail;
 
             if (response) {
                 // Remove the event listeners.
@@ -142,8 +267,12 @@ const batchFetch = (
             }
         };
 
-        const onBatchFetchCatch = (event: CustomEvent<Record<string, Error>>) => {
-            const error = event.detail?.[batchId];
+        const onBatchFetchCatch = (event: CustomEvent<BatchFetchCatchDetail>) => {
+            if (event.detail.batchId !== batchId) {
+                return;
+            }
+
+            const { error } = event.detail;
 
             if (error) {
                 // Remove the event listeners.
@@ -178,13 +307,17 @@ const batchFetch = (
                 // and unregister the request.
                 if (isRequestCounterMax(batchId, 'aborted')) {
                     // Clear the debounce timeout.
-                    if (requestDebounce[batchId]) {
-                        clearTimeout(requestDebounce[batchId]);
+                    const timeoutId = requestDebounce.get(batchId);
+
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
                     }
 
                     // Abort the signal.
-                    if (requestSignals[batchId]) {
-                        requestSignals?.[batchId]?.abort();
+                    const requestSignal = requestSignals.get(batchId);
+
+                    if (requestSignal) {
+                        requestSignal.abort();
                     }
 
                     // Unregister the request.

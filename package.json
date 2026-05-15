@@ -17,11 +17,7 @@
   "author": "Sofyan Sitorus (https://sofyansitorus.com)",
   "license": "MIT",
   "devDependencies": {
-    "@types/object-hash": "^3.0.6",
     "typescript": "^5.4.5"
-  },
-  "dependencies": {
-    "object-hash": "^3.0.0"
   },
   "repository": {
     "type": "git",
