@@ -42,6 +42,10 @@ console.log(await b.json());
 console.log(await c.json());
 ```
 
+## Demo
+
+https://codesandbox.io/p/sandbox/batch-fetch-react-gxyw23
+
 ## How Batching Works
 
 - Calls are grouped by a deterministic batch key created from `url` and `options` (excluding `options.signal`).
