@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc"
+    "build": "tsc",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [
     "fetch",
@@ -17,6 +19,7 @@
   "author": "Sofyan Sitorus (https://sofyansitorus.com)",
   "license": "MIT",
   "devDependencies": {
+    "prettier": "^3.8.3",
     "typescript": "^5.4.5"
   },
   "repository": {

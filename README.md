@@ -10,6 +10,16 @@ You can install `batchFetch` via npm:
 npm install @sofyansitorus/batch-fetch
 ```
 
+#### Development
+
+```bash
+npm run format
+npm run format:check
+```
+
+- `npm run format`: formats all files in the project.
+- `npm run format:check`: checks whether files are already formatted.
+
 #### Usage
 
 ```javascript
@@ -28,27 +38,27 @@ import batchFetch from '@sofyansitorus/batch-fetch';
 
 const url = 'https://api.example.com/data';
 const options = {
-    method: 'POST', // Using POST method for demonstration
-    body: JSON.stringify({ key: 'value' }), // Sample request data
-    headers: {
-        'Content-Type': 'application/json'
-    }
+  method: 'POST', // Using POST method for demonstration
+  body: JSON.stringify({ key: 'value' }), // Sample request data
+  headers: {
+    'Content-Type': 'application/json',
+  },
 };
 
 const requests = Array(5).fill({ url, options });
 
-requests.forEach(request => {
-    // Sending the same request data multiple times
-    batchFetch(request.url, request.options)
-        .then(response => response.json()) // Parse the response body as JSON
-        .then(response => {
-            // Handle response
-            console.log(response);
-        })
-        .catch(error => {
-            // Handle error
-            console.error(error);
-        });
+requests.forEach((request) => {
+  // Sending the same request data multiple times
+  batchFetch(request.url, request.options)
+    .then((response) => response.json()) // Parse the response body as JSON
+    .then((response) => {
+      // Handle response
+      console.log(response);
+    })
+    .catch((error) => {
+      // Handle error
+      console.error(error);
+    });
 });
 ```
 
